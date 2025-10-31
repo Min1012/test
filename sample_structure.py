@@ -52,8 +52,27 @@ class MSTMTEModel:
         self.params = {}
         for var in ["Hs", "U"]:
             self.params[var] = fit_gpd(self.data[var].values, self.thr_mar*100)
+        self.form_partitions(percentile=self.thr_mar * 100)
         self.fitted = True
-
+        
+    # Partition Formation
+    def form_partitions(self, percentile=70):
+        """Form partitions C_d where each variable is the driver of the joint extreme"""
+        df = pd.DataFrame({
+            "Hs": self.data["Hs"].values,
+            "U": self.data["U"].values
+        })
+        # Thresholds ψ_d
+        psi = {col: np.percentile(df[col], percentile) for col in df.columns}
+        # Identify rows where variable exceeds its threshold and is the maximum
+        partitions = {col: df.index[(df[col] > psi[col]) & (df[col] == df.max(axis=1))].tolist()
+                      for col in df.columns}
+        # Empirical frequencies ρ_d
+        counts = {col: len(partitions[col]) for col in df.columns}
+        total = sum(counts.values()) or 1
+        rho = {col: counts[col] / total for col in df.columns}
+        self.partitions, self.rho, self.psi = partitions, rho, psi
+    
     # Simulation
     def simulate(self, return_period=100):
         """Generate synthetic extremes using conditional Heffernan-Tawn"""
