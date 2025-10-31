@@ -81,9 +81,25 @@ class MSTMTEModel:
         # Insert conditional extremes logic here
         # Placeholder simulation
         self.simulated = {k: np.random.randn(1000) for k in self.params.keys()}
+        
+    # Attachment of time exposure
+    def attach_time_exposure(self, stm_values, exposure_array):
+        """Attach time-exposure to simulated values"""
+        tc_series = []
+        for val in stm_values:
+            # Randomly choose an exposure pattern and scale it by the STM magnitude
+            exposure = exposure_array[np.random.randint(0, len(exposure_array))]
+            tc_series.append(val * exposure)
+        return tc_series
+
+    # Computation of return value
+    def compute_return_value(data, return_period, annual_frequency=1):
+        """Return level corresponding to given return period"""
+        p = 1 - 1 / (return_period * annual_frequency)
+        return np.quantile(data, p)
 
     # Save / Load
-    def save(self, path="mstme_condition.dill"):
+    def save(self, path="mstmte_condition.dill"):
         """Save model to file"""
         with open(path, "wb") as f:
             dill.dump(self, f)
@@ -122,6 +138,6 @@ if __name__ == "__main__":
         model.save()
 
     if args.simulate:
-        model = MSTMEModel.load("mstme_condition.dill")
+        model = MSTMEModel.load("mstmte_condition.dill")
         model.simulate(return_period=args.simulate)
         plot_return_curves(model)
