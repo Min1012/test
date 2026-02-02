@@ -10,22 +10,102 @@ from scipy.optimize import minimize
 import dill
 
 # 2. Utility functions
+def gp_cdf(mu, sigma, kesi, x1, x2):
+    """
+    Compute the cumulative distribution function of the Generalized pareto distribution
+    :param mu: location parameter
+    :param sigma: scale parameter
+    :param kesi: shape parameter
+    :param x1: xi − δ ( refer the paper "Extreme value estimation using the likelihood-weighted method"
+    :param x2: xi + δ ( refer the paper "Extreme value estimation using the likelihood-weighted method"
+    :return: the cumulative distribution function
+    """
+    condition_1 = kesi >= 0
+    condition_2 = x1 - mu <= -sigma / kesi
+    condition_3 = x2 - mu <= -sigma / kesi
+    condition = np.logical_and(np.logical_or(condition_1, condition_2), np.logical_or(condition_1, condition_3))
+    cdf_1 = 1 - (1 + kesi * (x1 - mu) / sigma) ** (-1 / kesi * condition)
+    cdf_2 = 1 - (1 + kesi * (x2 - mu) / sigma) ** (-1 / kesi * condition)
+    cdf = cdf_2 - cdf_1
+    return cdf
+
+
+def likelihood_weight(data, threshold_value, sigma_upper=100):
+    """
+    Compute the parameters of GP distribution using likelihood-weighted method
+    refer paper :"Extreme value estimation using the likelihood-weighted method"
+    :param data: input observation data
+    :param threshold_value: given high threshold value
+    :param sigma_upper: upper bound of sigma
+    :param sigma_num: the number of sigma divided
+    :return: scale and shape parameters
+    """
+    pot_value = data
+    sigma = np.arange(0.01, sigma_upper, 0.1)
+    kesi = np.linspace(-0.999999, 0.9999, 100)
+    sigma_m, kesi_m = np.meshgrid(sigma, kesi)
+    cdf_pro = np.ones_like(sigma_m)
+    for item in pot_value:
+        cdf = gp_cdf(threshold_value, sigma_m, kesi_m, item - 0.005, item + 0.005)
+        cdf_pro = cdf_pro * cdf
+        cdf_pro = cdf_pro / np.sum(cdf_pro)
+
+    max_position = np.unravel_index(cdf_pro.argmax(), cdf_pro.shape)
+    sigma = sigma_m[max_position[0]][max_position[1]]
+    kesi = kesi_m[max_position[0]][max_position[1]]
+    return sigma, kesi
+
+
+# 2. Utility functions
 def fit_gpd(data, percentile):
     """Fit GPD to data above a percentile threshold"""
     threshold = np.percentile(data, percentile)
     exceed = data[data > threshold] - threshold
-    shape, loc, scale = genpareto.fit(exceed, floc=0)
-    return dict(shape=shape, scale=scale, threshold=threshold)
+    scale, shape = likelihood_weight(exceed, threshold)  # Compute the parameters of GP distribution using likelihood-weighted method
+    return dict(shape=shape, scale=scale, threshold=threshold, percentile=percentile)
 
-def to_laplace(data):
-    """Transform to Laplace space"""
-    ranks = (np.argsort(np.argsort(data)) + 1) / (len(data) + 1)
-    return laplace.ppf(ranks)
 
-def from_laplace(z):
-    """Inverse Laplace transform (approx)"""
-    ranks = laplace.cdf(z)
-    return np.quantile(z, ranks)
+def gdp_cdf(x, threshold, shape, scale, percentile):
+    """the cumulative distribution function"""
+    # p_cumulative = percentile + (1 - percentile) * genpareto.cdf(x,loc=threshold, c=shape, scale=scale)
+    p_cumulative = percentile + (1 - percentile) * genpareto.cdf(x, loc=threshold, c=shape, scale=scale)
+    return p_cumulative
+
+
+def gpd_ppf(p_cumulative, threshold, shape, scale, percentile):
+    """Percent Point Function, inverse of the cumulative distribution function"""
+    # p_cumulative = percentile + (1 - percentile) * genpareto.cdf(x,loc=threshold, c=shape, scale=scale)
+    # (p_cumulative - percentile) / (1 - percentile) = genpareto.cdf(x,loc=threshold, c=shape, scale=scale)
+    p_cumulative_transform = (p_cumulative - percentile) / (1 - percentile)
+    return genpareto.ppf(p_cumulative_transform, loc=threshold, c=shape, scale=scale)
+
+
+def to_laplace(p_cumulative):
+    """Transform to Laplace space
+        p_cumulative: Cumulative probability
+    """
+    p_cumulative = np.array(p_cumulative)
+    data_laplace = np.where(
+        p_cumulative < 0.5,
+        np.log(2 * p_cumulative),
+        -np.log(2 * (1 - p_cumulative))
+    )
+    return data_laplace
+
+
+def from_laplace(data_laplace):
+    """Inverse Laplace transform
+    data_laplace: Samples in Laplace space
+    p_cumulative: Cumulative probability
+    """
+    data_laplace = np.array(data_laplace)
+    p_cumulative = np.where(
+        data_laplace >= 0,
+        1 - 0.5 * np.exp(-data_laplace),
+        0.5 * np.exp(data_laplace)
+    )
+    return p_cumulative
+
   
 # 3. Core modeling class
 class MSTMTEModel:
